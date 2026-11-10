@@ -1,9 +1,8 @@
 services:
-
   user-service:
     build:
       context: ./services/user-service
-    image: user-service:local
+    image: ${USER_IMAGE:-user-service:local}
     container_name: user-service
     environment:
       PORT: 3001
@@ -22,7 +21,7 @@ services:
   product-service:
     build:
       context: ./services/product-service
-    image: product-service:local
+    image: ${PRODUCT_IMAGE:-product-service:local}
     container_name: product-service
     environment:
       PORT: 3002
@@ -41,7 +40,7 @@ services:
   order-service:
     build:
       context: ./services/order-service
-    image: order-service:local
+    image: ${ORDER_IMAGE:-order-service:local}
     container_name: order-service
     environment:
       PORT: 3003
