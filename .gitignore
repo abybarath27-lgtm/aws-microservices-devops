@@ -1,0 +1,25 @@
+# Terraform state and configuration
+**/.terraform/*
+*.tfstate
+*.tfstate.*
+tfplan
+crash.log
+override.tf
+override.tf.json
+
+# Node.js
+node_modules/
+npm-debug.log*
+.npm/
+
+# Environment variables and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+.aws/
+credentials
+
+# Jenkins and application logs
+*.log
