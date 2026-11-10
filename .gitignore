@@ -29,3 +29,4 @@ credentials
 *.backup*
 *.before-fix
 Jenkinsfile.before-rollback-fix
+Jenkinsfile.before-rollback-test
