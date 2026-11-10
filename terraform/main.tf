@@ -37,3 +37,13 @@ output "ecr_repository_urls" {
     name => repository.repository_url
   }
 }
+
+# Reference the existing EC2 deployment IAM role
+data "aws_iam_role" "deployment" {
+  name = "EC2-ECR-Deployment-Role"
+}
+
+# Reference the existing EC2 instance profile
+data "aws_iam_instance_profile" "deployment" {
+  name = "EC2-ECR-Deployment-Role"
+}

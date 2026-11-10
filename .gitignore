@@ -23,3 +23,8 @@ credentials
 
 # Jenkins and application logs
 *.log
+
+# Terraform temporary files and backups
+*.tfplan
+*.backup*
+*.before-fix
