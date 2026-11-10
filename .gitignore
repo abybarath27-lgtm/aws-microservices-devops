@@ -28,3 +28,4 @@ credentials
 *.tfplan
 *.backup*
 *.before-fix
+Jenkinsfile.before-rollback-fix

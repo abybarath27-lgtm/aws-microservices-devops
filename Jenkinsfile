@@ -313,7 +313,7 @@ pipeline {
                     env.PREVIOUS_PRODUCT_IMAGE &&
                     env.PREVIOUS_ORDER_IMAGE) {
 
-                    echo "Attempting rollback..."
+                    echo "Attempting rollback to previous images..."
 
                     withEnv([
                         "USER_IMAGE=${env.PREVIOUS_USER_IMAGE}",
@@ -321,18 +321,65 @@ pipeline {
                         "ORDER_IMAGE=${env.PREVIOUS_ORDER_IMAGE}"
                     ]) {
                         sh '''
+                            set -eu
+
+                            echo "Pulling previous images..."
+                            docker compose -p aws-microservices-devops \
+                              -f "$WORKSPACE/docker-compose.yml" pull
+
+                            echo "Restoring previous deployment..."
                             docker compose -p aws-microservices-devops \
                               -f "$WORKSPACE/docker-compose.yml" \
-                              up -d --no-build || true
+                              up -d --no-build
 
+                            echo "Waiting for healthy containers..."
+                            for service in user-service product-service order-service; do
+                                healthy=false
+                                for attempt in $(seq 1 30); do
+                                    status=$(docker inspect \
+                                      --format='{{.State.Health.Status}}' "$service" \
+                                      2>/dev/null || echo "missing")
+                                    if [ "$status" = "healthy" ]; then
+                                        healthy=true
+                                        break
+                                    fi
+                                    sleep 2
+                                done
+
+                                if [ "$healthy" != "true" ]; then
+                                    echo "ROLLBACK FAILED: $service is not healthy."
+                                    docker logs --tail 50 "$service" || true
+                                    exit 1
+                                fi
+                                echo "$service is healthy."
+                            done
+
+                            echo "Verifying restored APIs..."
+                            curl --retry 5 --retry-delay 2 \
+                              --retry-connrefused -fsS \
+                              http://127.0.0.1/api/users
+
+                            curl --retry 5 --retry-delay 2 \
+                              --retry-connrefused -fsS \
+                              http://127.0.0.1/api/products
+
+                            ORDER_RESPONSE=$(curl --retry 5 --retry-delay 2 \
+                              --retry-connrefused -fsS \
+                              http://127.0.0.1/api/orders)
+
+                            echo "$ORDER_RESPONSE"
+                            echo "$ORDER_RESPONSE" | grep -q "Order Placed"
+
+                            echo "Rollback completed and verified successfully."
                             docker compose -p aws-microservices-devops \
                               -f "$WORKSPACE/docker-compose.yml" ps
                         '''
                     }
+                } else {
+                    echo "Rollback skipped: deployment did not start or previous images were not captured."
                 }
             }
         }
-
         always {
             echo "Pipeline execution finished."
         }
