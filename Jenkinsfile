@@ -307,9 +307,6 @@ ORDER_IMAGE=${previousOrder}
                       -f "$WORKSPACE/docker-compose.yml" ps
 
                     echo "Deployment verified successfully."
-
-                    echo "INTENTIONAL ROLLBACK TEST: forcing failure."
-                    exit 1
                 '''
             }
         }
