@@ -13,7 +13,6 @@ pipeline {
         AWS_ACCOUNT_ID = '660083831844'
         ECR_REGISTRY = '660083831844.dkr.ecr.ap-southeast-2.amazonaws.com'
         AWS_PAGER = ''
-        DEPLOYMENT_STARTED = 'false'
     }
 
     stages {
@@ -21,6 +20,9 @@ pipeline {
         stage('Checkout') {
             steps {
                 checkout scm
+
+                // Remove stale rollback data from an earlier build.
+                sh 'rm -f rollback.env'
 
                 script {
                     def commitId = sh(
@@ -211,21 +213,36 @@ pipeline {
         stage('Deploy') {
             steps {
                 script {
-                    env.PREVIOUS_USER_IMAGE = sh(
+                    // Capture currently running image references.
+                    def previousUser = sh(
                         script: "docker inspect --format='{{.Config.Image}}' user-service",
                         returnStdout: true
                     ).trim()
 
-                    env.PREVIOUS_PRODUCT_IMAGE = sh(
+                    def previousProduct = sh(
                         script: "docker inspect --format='{{.Config.Image}}' product-service",
                         returnStdout: true
                     ).trim()
 
-                    env.PREVIOUS_ORDER_IMAGE = sh(
+                    def previousOrder = sh(
                         script: "docker inspect --format='{{.Config.Image}}' order-service",
                         returnStdout: true
                     ).trim()
 
+                    echo "Previous user image: ${previousUser}"
+                    echo "Previous product image: ${previousProduct}"
+                    echo "Previous order image: ${previousOrder}"
+
+                    // Persist previous images before starting deployment.
+                    writeFile(
+                        file: 'rollback.env',
+                        text: """USER_IMAGE=${previousUser}
+PRODUCT_IMAGE=${previousProduct}
+ORDER_IMAGE=${previousOrder}
+"""
+                    )
+
+                    // Set the new deployment image references.
                     env.USER_IMAGE =
                         "${env.ECR_REGISTRY}/user-service:${env.IMAGE_TAG}"
 
@@ -234,8 +251,6 @@ pipeline {
 
                     env.ORDER_IMAGE =
                         "${env.ECR_REGISTRY}/order-service:${env.IMAGE_TAG}"
-
-                    env.DEPLOYMENT_STARTED = 'true'
                 }
 
                 sh '''
@@ -292,9 +307,6 @@ pipeline {
                       -f "$WORKSPACE/docker-compose.yml" ps
 
                     echo "Deployment verified successfully."
-
-                    echo "INTENTIONAL ROLLBACK TEST: forcing failure."
-                    exit 1
                 '''
             }
         }
@@ -311,41 +323,47 @@ pipeline {
             echo "Pipeline failed."
 
             script {
-                if (env.DEPLOYMENT_STARTED == 'true' &&
-                    env.PREVIOUS_USER_IMAGE &&
-                    env.PREVIOUS_PRODUCT_IMAGE &&
-                    env.PREVIOUS_ORDER_IMAGE) {
+                if (fileExists('rollback.env')) {
 
-                    echo "Attempting rollback to previous images..."
+                    echo "Previous image references found."
+                    echo "Attempting automatic rollback..."
 
-                    withEnv([
-                        "USER_IMAGE=${env.PREVIOUS_USER_IMAGE}",
-                        "PRODUCT_IMAGE=${env.PREVIOUS_PRODUCT_IMAGE}",
-                        "ORDER_IMAGE=${env.PREVIOUS_ORDER_IMAGE}"
-                    ]) {
+                    def rollbackVariables =
+                        readFile('rollback.env').readLines()
+
+                    withEnv(rollbackVariables) {
+
                         sh '''
                             set -eu
 
                             echo "Pulling previous images..."
+
                             docker compose -p aws-microservices-devops \
                               -f "$WORKSPACE/docker-compose.yml" pull
 
                             echo "Restoring previous deployment..."
+
                             docker compose -p aws-microservices-devops \
                               -f "$WORKSPACE/docker-compose.yml" \
                               up -d --no-build
 
                             echo "Waiting for healthy containers..."
+
                             for service in user-service product-service order-service; do
+
                                 healthy=false
+
                                 for attempt in $(seq 1 30); do
+
                                     status=$(docker inspect \
                                       --format='{{.State.Health.Status}}' "$service" \
                                       2>/dev/null || echo "missing")
+
                                     if [ "$status" = "healthy" ]; then
                                         healthy=true
                                         break
                                     fi
+
                                     sleep 2
                                 done
 
@@ -354,10 +372,13 @@ pipeline {
                                     docker logs --tail 50 "$service" || true
                                     exit 1
                                 fi
+
                                 echo "$service is healthy."
+
                             done
 
                             echo "Verifying restored APIs..."
+
                             curl --retry 5 --retry-delay 2 \
                               --retry-connrefused -fsS \
                               http://127.0.0.1/api/users
@@ -371,18 +392,22 @@ pipeline {
                               http://127.0.0.1/api/orders)
 
                             echo "$ORDER_RESPONSE"
+
                             echo "$ORDER_RESPONSE" | grep -q "Order Placed"
 
                             echo "Rollback completed and verified successfully."
+
                             docker compose -p aws-microservices-devops \
                               -f "$WORKSPACE/docker-compose.yml" ps
                         '''
                     }
+
                 } else {
-                    echo "Rollback skipped: deployment did not start or previous images were not captured."
+                    echo "Rollback skipped: no previous deployment image references were saved."
                 }
             }
         }
+
         always {
             echo "Pipeline execution finished."
         }
